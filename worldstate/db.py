@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Union
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
-SCHEMA_VERSION = "1"
 
 
 def connect(path: Union[str, Path] = ":memory:") -> sqlite3.Connection:
@@ -23,25 +22,6 @@ def connect(path: Union[str, Path] = ":memory:") -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
-    _initialize(conn)
+    conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+    conn.commit()
     return conn
-
-
-def _initialize(conn: sqlite3.Connection) -> None:
-    already = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_meta'"
-    ).fetchone()
-    if already is None:
-        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
-        conn.execute(
-            "INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', ?)",
-            (SCHEMA_VERSION,),
-        )
-        conn.commit()
-
-
-def schema_version(conn: sqlite3.Connection) -> str:
-    row = conn.execute(
-        "SELECT value FROM schema_meta WHERE key = 'schema_version'"
-    ).fetchone()
-    return row["value"] if row else ""

@@ -5,33 +5,29 @@ Build the persistent data layer that holds a coherent story world, so later
 stages can read from it and write approved changes back. NO generation, NO
 validation, NO personalization in this task.
 
-## Pre-answered decisions (do NOT stop to ask — decided)
-- Language: Python. Storage: SQLite (local file). No ORM needed; sqlite3 or a
-  thin wrapper is fine.
-- Reads return plain dataclasses. Writes go through one path only.
-- Canon changes ONLY by applying an approved changeset; every canon row records
-  the changeset that created/last-modified it (provenance).
-- Repo: storyos-kids only.
+## Pre-answered decisions (decided)
+- Language: Python. Storage: SQLite (local file). No ORM.
+- Storage sits behind an interface with clean, swappable signatures.
 
-## Scope (what "backbone" means here)
-- Schema for a world and its canon: entities (character/location/item/faction/
-  concept), facts (key/value attributes), relationships (typed edges), events
-  (a timeline) + event participants.
-- Write-back audit trail: changesets + individual changes, applied atomically.
-- A read API that returns a full world-state snapshot (the "retrieve" step the
-  later generation loop will call).
+## Tables required (exact names and fields)
+- `canon`: id, statement, category, immutable(bool)
+- `characters`: id, name, traits(json), relationships(json), speech_style,
+  history(json)
+- `events`: id, order_index, summary, characters_involved(json),
+  world_refs(json), created_at
+- `per_child`: SCHEMA ONLY — child_id, characters_met(json), threads(json).
+  Create the table but DO NOT populate it and DO NOT build any personalization
+  logic on it. It is a stub for later.
+
+## Functions required (storage behind an interface)
+- `get_world_slice(character_ids=None, recent_events=N, canon_categories=None) -> dict`
+- `write_events(events: list) -> None`
+- `get_character(id)`, `add_character(...)`, `add_canon(...)` as needed
 
 ## Explicitly NOT in this task
-- No story generation, no coherence validator, no personalization.
-- No TTS, no UI, no multi-world orchestration beyond storing multiple worlds.
-
-## Deliverables
-- `worldstate/` package: `schema.sql`, `db.py`, `models.py`, `repository.py`.
-- `tests/` pytest suite (CRUD, lifecycle, atomic rollback, provenance, FK
-  cascade, cross-world isolation).
-- `scripts/seed_demo.py`: seeds a world, retrieves state, evolves it, prints.
+- No story generation, no coherence validator, no personalization logic.
+- No CLI. No TTS, no UI.
 
 ## Stop condition
-Schema + repository API + migrations + a green test suite + the demo script,
-committed and pushed to the working branch. No generation/validation/
-personalization.
+Schema (exact tables/fields) + the storage interface + required functions + a
+green test suite + the demo script, committed and pushed. Backbone only.

@@ -1,8 +1,7 @@
 # RUN LOG — World-State Backbone
 
 A factual, chronological record of what was built this session, the decisions
-made, the caveats, and how it was verified. Kept honest on purpose: it records
-what actually happened, including a known spec divergence.
+made, and how it was verified.
 
 ## Session
 - Date: 2026-07-05
@@ -10,73 +9,72 @@ what actually happened, including a known spec divergence.
 - Task: build the World-State Backbone only (see `docs/CURRENT_TASK.md`).
   Explicitly NOT generation, validation, or personalization.
 
-## Known caveat — spec divergence (unresolved)
-- `docs/CURRENT_TASK.md` arrived truncated mid-sentence ("...sqlite3 or a thin")
-  and was received that way on repeated sends. The task was reconstructed from
-  the stated Goal plus `docs/SOURCES_OF_TRUTH.md`.
-- Follow-up review questions referenced a schema with tables named `canon`,
-  `characters`, `events`, and `per_child`, and a `RUN_LOG.md` deliverable. The
-  backbone as built uses a different, generic shape (see Schema below): there
-  are no tables named `canon`, `characters`, or `per_child`. `per_child` was
-  intentionally omitted because per-child personalization is out of scope this
-  phase per `SOURCES_OF_TRUTH.md`.
-- Outstanding decision for the reviewer: whether to rename/reshape the schema to
-  those literal names (and whether a `per_child` storage scaffold is in scope).
-  Not done unilaterally — it touches the personalization scope line.
+## Spec history (resolved)
+- `docs/CURRENT_TASK.md` first arrived truncated ("...sqlite3 or a thin"). A
+  backbone was built from a reconstructed spec (worlds/entities/facts/
+  relationships + a changeset write-back layer). That shape did not match the
+  reviewer's intended schema.
+- The real, un-truncated spec was then supplied and the schema was reconciled
+  in one pass to the exact tables/fields and function signatures below. The
+  earlier entity/changeset model and the read-only CLI were removed.
 
-## What was built
-- `worldstate/schema.sql` — SQLite schema. Canon = `worlds`, `entities`,
-  `facts`, `relationships`, `events`, `event_participants`. Write-back audit
-  trail = `changesets`, `changes`. Plus `schema_meta` (version marker).
-- `worldstate/db.py` — connection + schema init (stdlib `sqlite3`, no ORM),
-  `PRAGMA foreign_keys = ON`.
-- `worldstate/models.py` — frozen dataclasses returned by reads; `WorldState`
-  snapshot.
-- `worldstate/repository.py` — `WorldStateStore`. The only write path into
-  canon is `propose_changeset -> stage_* -> approve_changeset ->
-  apply_changeset`; apply is atomic and stamps provenance on every touched row.
-  Read/audit surface: `retrieve_world_state`, `get_entity`, `list_entities`,
-  `get_facts`, `get_relationships`, `get_events`, `get_event_participants`,
-  `provenance`, `audit_log`, `export_world`.
-- `scripts/seed_demo.py` — end-to-end demo (seed -> retrieve -> evolve -> print).
-- `tests/` — pytest suite (29 cases): schema/FK/persistence, changeset
-  lifecycle guards, happy path, provenance, atomic rollback, updates/deletes,
-  FK cascade, cross-world isolation, read helpers, audit log, JSON export.
-- Docs/config: `docs/SOURCES_OF_TRUTH.md`, `docs/CURRENT_TASK.md`, `README.md`,
-  `pyproject.toml`, `.gitignore`, this `docs/RUN_LOG.md`.
+## Final schema (exact fields)
+- `canon`: id, statement, category, immutable(bool as INTEGER 0/1)
+- `characters`: id, name, traits(json), relationships(json), speech_style,
+  history(json)
+- `events`: id, order_index, summary, characters_involved(json),
+  world_refs(json), created_at
+- `per_child` — SCHEMA ONLY: child_id (PK), characters_met(json), threads(json).
+  Created by the schema; no function populates it; no personalization logic.
 
-## Key decisions (from SOURCES_OF_TRUTH + reconstructed task)
-- Python + SQLite (local file), no ORM.
-- Canon is truth; canon changes only through an approved, audited changeset.
-- Facts modeled as structured key/value on entities, plus typed relationships
-  and timeline events. (Chosen as the most queryable option for a later
-  validator; recorded as a default, open to revision.)
+## Storage interface (swappable)
+- `worldstate/store.py` defines `WorldStore` (abstract) and `SqliteWorldStore`.
+- Functions:
+  - `get_world_slice(character_ids=None, recent_events=10, canon_categories=None) -> dict`
+    (character_ids None -> all; recent_events None -> all, else N most recent
+    returned chronologically; canon_categories None -> all)
+  - `write_events(events: list) -> None` (atomic bulk append; created_at auto)
+  - `get_character(id)`, `add_character(...)`, `add_canon(...)`
+  - plus `get_canon`, `list_canon`, `list_characters`
+- JSON columns are stored as TEXT and exposed as Python objects via dataclasses
+  in `worldstate/models.py`.
+
+## Files
+- `worldstate/`: `schema.sql`, `db.py`, `models.py`, `store.py`, `__init__.py`
+- `scripts/seed_demo.py` — seed canon/characters/events -> print world slices
+- `tests/` — pytest suite (23 cases): schema/exact-columns, per_child stub,
+  canon CRUD + immutable roundtrip + category filter, character CRUD + JSON
+  roundtrip, event bulk write + defaults + atomicity, world-slice shape /
+  filters / recent-N ordering / JSON-serializability, file persistence,
+  interface conformance.
+- Docs/config: `docs/SOURCES_OF_TRUTH.md`, `docs/CURRENT_TASK.md` (real spec),
+  `README.md`, `pyproject.toml`, `.gitignore`, this `docs/RUN_LOG.md`.
 
 ## Commit timeline (branch)
 1. Add SOURCES_OF_TRUTH decided-facts doc.
 2. Add Operating mode section and complete Current phase line.
-3. Build world-state backbone: SQLite canon + changeset write-back.
+3. Build world-state backbone (reconstructed spec: entities + changesets).
 4. Extend backbone: read helpers, provenance, audit log, export, CLI.
-5. Remove CLI to keep the PR strictly backbone-only; add this run log.
+5. Remove CLI to keep the PR backbone-only; add run log.
+6. Reconcile schema to the real spec (canon/characters/events/per_child +
+   WorldStore interface); remove the entity/changeset model and CLI.
 
-## CLI: added then removed
-- A read-only inspection CLI (`python -m worldstate ...`) was added under a
-  "go as far as you can" instruction, then removed at the reviewer's request so
-  the PR is strictly backbone-only. The audit/export *methods* it used remain on
-  `WorldStateStore` (they are backbone read surface, not CLI).
-
-## Pull request
-- PR #1 opened against a `main` base branch created at the repo's initial commit
-  (the repository was empty; the working branch was the only/default branch).
-- CI: none configured (0 GitHub Actions workflows, 0 status checks). Nothing to
-  turn green or autofix. The session is subscribed to PR activity for reviews
-  and any future CI.
+## Removed vs the real spec
+- Dropped: `worlds`, `entities`, `facts`, `relationships`, `event_participants`,
+  `changesets`, `changes`, provenance columns, and the read-only CLI. None of
+  these are in the real spec.
 
 ## Verification
-- `python -m pytest` -> 29 passed.
-- `python scripts/seed_demo.py` -> runs; prints the seeded and evolved world
-  slice (2 changesets applied).
-- File-backed DB reopened successfully (schema persists, no re-init error).
+- `python -m pytest` -> 23 passed.
+- `python scripts/seed_demo.py` -> prints a full slice and a focused slice;
+  `per_child` reports 0 rows (stub).
+- File-backed DB reopened successfully (schema persists).
+
+## Pull request
+- PR #1 targets a `main` base branch created at the repo's initial commit (the
+  repository was empty; the working branch was the only/default branch).
+- CI: none configured (0 workflows, 0 checks). Session subscribed to PR
+  activity for reviews and any future CI.
 
 ## Status
 - Halted, awaiting review. No work started past the current-phase line.

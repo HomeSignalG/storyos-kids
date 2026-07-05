@@ -7,56 +7,60 @@ Persistent canon layer for coherent, evolving kids' bedtime story worlds.
 > [`docs/CURRENT_TASK.md`](docs/CURRENT_TASK.md).
 
 This repository currently contains **only** the world-state backbone: the
-schema, read models, and the changeset-based write path. No generation,
-validation, or personalization yet.
+schema and a swappable storage interface. No generation, validation, or
+personalization. `per_child` exists as a schema-only stub for later.
 
 ## Layout
 
 ```
 worldstate/
-  schema.sql       SQLite schema (canon + changeset audit trail)
+  schema.sql       SQLite schema: canon, characters, events, per_child (stub)
   db.py            connection + schema init
-  models.py        dataclasses returned by reads
-  repository.py    WorldStateStore: reads canon, writes via changesets
+  models.py        dataclasses (JSON fields exposed as Python objects)
+  store.py         WorldStore interface + SqliteWorldStore implementation
 scripts/
   seed_demo.py     end-to-end demonstration
 tests/             pytest suite
 ```
 
-## The one write path
+## Schema (exact fields)
 
-Canon never changes by direct edit. The only way in is an approved changeset:
+- **canon**: `id, statement, category, immutable(bool)`
+- **characters**: `id, name, traits(json), relationships(json), speech_style, history(json)`
+- **events**: `id, order_index, summary, characters_involved(json), world_refs(json), created_at`
+- **per_child** *(schema only — not populated, no logic)*: `child_id, characters_met(json), threads(json)`
+
+## Storage interface
+
+`WorldStore` keeps signatures clean and swappable; `SqliteWorldStore` is the
+SQLite implementation.
 
 ```python
-from worldstate import WorldStateStore
+from worldstate import SqliteWorldStore
 
-store = WorldStateStore.open("emberfall.db")   # or ":memory:"
-world = store.create_world("emberfall", "Emberfall")
+store = SqliteWorldStore.open("emberfall.db")   # or ":memory:"
 
-cs = store.propose_changeset(world.id, author="me", note="seed")
-store.stage_entity(cs.id, kind="character", slug="pip", name="Pip the Fox")
-store.stage_fact(cs.id, entity_slug="pip", key="species", value="fox")
-store.approve_changeset(cs.id)     # gate
-store.apply_changeset(cs.id)       # atomic write-back, stamps provenance
+store.add_canon("Lanterns never gutter.", category="setting", immutable=True)
+pip = store.add_character("Pip the Fox", traits=["curious"],
+                          relationships={"hollow": "home"}, speech_style="warm")
+store.write_events([
+    {"order_index": 1, "summary": "Pip lights the first lantern.",
+     "characters_involved": [pip.id], "world_refs": ["ever-lantern"]},
+])
 
-state = store.retrieve_world_state(world.id)   # the "retrieve" step
+slice = store.get_world_slice(character_ids=[pip.id], recent_events=5,
+                              canon_categories=["setting", "tone"])
+# -> {"canon": [...], "characters": [...], "events": [...]}  (JSON-serializable)
 ```
 
-Applying a changeset is atomic: if any change fails, none are written and the
-changeset stays `approved` (not `applied`). Every canon row records the
-changeset that created and last modified it.
-
-## Reading canon
-
-- `retrieve_world_state(world_id)` — full canon snapshot (the retrieve step).
-- `get_entity`, `list_entities`, `get_facts`, `get_relationships`, `get_events`.
-- `provenance(table, row_id)` — the changesets that created / last modified a row.
-- `audit_log(world_id)` — flat, ordered record of every applied change.
-- `export_world(world_id)` — JSON-serializable snapshot (for batch-ahead audit).
+Required functions: `get_world_slice(character_ids=None, recent_events=N,
+canon_categories=None)`, `write_events(events)`, `get_character(id)`,
+`add_character(...)`, `add_canon(...)` (plus `get_canon`, `list_canon`,
+`list_characters`).
 
 ## Run
 
 ```bash
-python -m pytest              # 29 tests
+python -m pytest              # 23 tests
 python scripts/seed_demo.py   # end-to-end demo
 ```
