@@ -1,6 +1,14 @@
 # SOURCES OF TRUTH — Decided Facts
 # Settled. Do not relitigate or contradict. To change one, STOP and ask.
 
+## Operating mode (decided)
+- Runs UNATTENDED (including overnight). Work continuously to the current task's stop condition.
+- Batch every question and permission need at Checkpoint 1, before building. Do not drip-feed later.
+- After "go", do not pause for approval on routine actions (commands, installs, writes, commits, pushes)
+  within the current task and the storyos-kids repo.
+- Only the task's stop condition, or a genuinely irreversible/un-pre-answered decision, halts the run.
+- Repo: storyos-kids only. Never homesignal-site.
+
 ## Product
 - Vertical: kids bedtime stories. Persistent, coherent, evolving worlds.
 - Personalization is TASTE-AND-WORLD, not name-insertion. The child is NOT necessarily the hero.
@@ -42,4 +50,4 @@
 
 ## Current phase
 - Building the WORLD-STATE BACKBONE only. See /docs/CURRENT_TASK.md.
-- Not building: generation, validator
+- Not building: generation, validator, personalization.
