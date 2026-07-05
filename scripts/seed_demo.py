@@ -26,6 +26,10 @@ def seed(store: SqliteWorldStore) -> dict:
                     category="tone", immutable=True)
     store.add_canon("The old oak marks the centre of the Whispering Hollow.",
                     category="geography")
+    store.add_canon("Every creature keeps at least one small promise a day.",
+                    category="lore")
+    store.add_canon("The Ever-Lantern always guides a lost traveller home by morning.",
+                    category="lore", immutable=True)
 
     pip = store.add_character(
         "Pip the Fox",
