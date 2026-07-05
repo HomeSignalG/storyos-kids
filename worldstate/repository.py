@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Iterable, Optional, Union
 
@@ -520,6 +521,35 @@ class WorldStateStore:
         ).fetchall()
         return [Fact(**dict(r)) for r in rows]
 
+    def get_relationships(
+        self, entity_id: int, direction: str = "out"
+    ) -> list[Relationship]:
+        """Relationships touching an entity. ``direction`` is out/in/both."""
+        if direction == "out":
+            where, args = "src_entity_id = ?", (entity_id,)
+        elif direction == "in":
+            where, args = "dst_entity_id = ?", (entity_id,)
+        elif direction == "both":
+            where, args = "src_entity_id = ? OR dst_entity_id = ?", (entity_id, entity_id)
+        else:
+            raise ValueError(f"direction must be out/in/both, got {direction!r}")
+        rows = self.conn.execute(
+            f"SELECT * FROM relationships WHERE {where} ORDER BY id", args
+        ).fetchall()
+        return [Relationship(**dict(r)) for r in rows]
+
+    def get_events(self, world_id: int) -> list[Event]:
+        rows = self.conn.execute(
+            "SELECT * FROM events WHERE world_id = ? ORDER BY seq", (world_id,)
+        ).fetchall()
+        return [Event(**dict(r)) for r in rows]
+
+    def get_event_participants(self, event_id: int) -> list[EventParticipant]:
+        rows = self.conn.execute(
+            "SELECT * FROM event_participants WHERE event_id = ? ORDER BY id", (event_id,)
+        ).fetchall()
+        return [EventParticipant(**dict(r)) for r in rows]
+
     def retrieve_world_state(self, world_id: int) -> WorldState:
         """Full canon snapshot for a world — the read the generation loop uses."""
         world = self.get_world(world_id)
@@ -567,3 +597,75 @@ class WorldStateStore:
             events=events,
             event_participants=participants,
         )
+
+    # =======================================================================
+    # Audit / provenance and export
+    # =======================================================================
+
+    _PROVENANCE_TABLES = ("entities", "facts", "relationships")
+
+    def provenance(self, table: str, row_id: int) -> dict:
+        """The changesets that created and last modified a canon row.
+
+        Returns ``{"created_by": Changeset|None, "updated_by": Changeset|None}``.
+        ``events`` are append-only, so only ``created_by`` is populated for them.
+        """
+        if table == "events":
+            row = self.conn.execute(
+                "SELECT created_by_changeset_id FROM events WHERE id = ?", (row_id,)
+            ).fetchone()
+            if row is None:
+                raise NotFoundError(f"events row id={row_id} not found")
+            created = row["created_by_changeset_id"]
+            return {
+                "created_by": self.get_changeset(created) if created else None,
+                "updated_by": None,
+            }
+        if table not in self._PROVENANCE_TABLES:
+            raise ValueError(f"no provenance tracked for table {table!r}")
+        row = self.conn.execute(
+            f"SELECT created_by_changeset_id, updated_by_changeset_id "
+            f"FROM {table} WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        if row is None:
+            raise NotFoundError(f"{table} row id={row_id} not found")
+        created = row["created_by_changeset_id"]
+        updated = row["updated_by_changeset_id"]
+        return {
+            "created_by": self.get_changeset(created) if created else None,
+            "updated_by": self.get_changeset(updated) if updated else None,
+        }
+
+    def audit_log(self, world_id: int) -> list[dict]:
+        """Flat, ordered record of every applied change in a world.
+
+        One dict per change: changeset metadata joined with the change. This is
+        the audit surface the later batch-ahead-with-audit stage reads.
+        """
+        rows = self.conn.execute(
+            "SELECT c.id AS change_id, c.seq, c.op, c.target_table, c.target_id, "
+            "c.payload, cs.id AS changeset_id, cs.author, cs.note, cs.applied_at "
+            "FROM changes c JOIN changesets cs ON cs.id = c.changeset_id "
+            "WHERE cs.world_id = ? AND cs.status = 'applied' "
+            "ORDER BY cs.id, c.seq",
+            (world_id,),
+        ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["payload"] = json.loads(d["payload"])
+            out.append(d)
+        return out
+
+    def export_world(self, world_id: int) -> dict:
+        """A JSON-serializable snapshot of a world's full canon."""
+        state = self.retrieve_world_state(world_id)
+        return {
+            "world": asdict(state.world),
+            "entities": [asdict(e) for e in state.entities],
+            "facts": [asdict(f) for f in state.facts],
+            "relationships": [asdict(r) for r in state.relationships],
+            "events": [asdict(ev) for ev in state.events],
+            "event_participants": [asdict(p) for p in state.event_participants],
+        }

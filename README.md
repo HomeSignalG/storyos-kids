@@ -18,6 +18,7 @@ worldstate/
   db.py            connection + schema init
   models.py        dataclasses returned by reads
   repository.py    WorldStateStore: reads canon, writes via changesets
+  cli.py           read-only inspection CLI (python -m worldstate)
 scripts/
   seed_demo.py     end-to-end demonstration
 tests/             pytest suite
@@ -46,9 +47,26 @@ Applying a changeset is atomic: if any change fails, none are written and the
 changeset stays `approved` (not `applied`). Every canon row records the
 changeset that created and last modified it.
 
+## Reading canon
+
+- `retrieve_world_state(world_id)` — full canon snapshot (the retrieve step).
+- `get_entity`, `list_entities`, `get_facts`, `get_relationships`, `get_events`.
+- `provenance(table, row_id)` — the changesets that created / last modified a row.
+- `audit_log(world_id)` — flat, ordered record of every applied change.
+- `export_world(world_id)` — JSON-serializable snapshot (for batch-ahead audit).
+
+## Inspection CLI (read-only)
+
+```bash
+python -m worldstate worlds  world.db
+python -m worldstate show    world.db emberfall
+python -m worldstate log     world.db emberfall     # applied-change audit log
+python -m worldstate export  world.db emberfall     # canon as JSON
+```
+
 ## Run
 
 ```bash
-python -m pytest         # test suite
-python scripts/seed_demo.py
+python -m pytest              # 34 tests
+python scripts/seed_demo.py   # end-to-end demo
 ```
